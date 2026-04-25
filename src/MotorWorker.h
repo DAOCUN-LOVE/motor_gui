@@ -41,6 +41,7 @@ private:
     Pid::PidPosition* m_pid = nullptr;
     QTimer* m_timer = nullptr;
     float m_target_rpm = 3.0f;
+    float m_feedback_rpm = 0.0f;
     int m_motorId;
     bool m_initialized = false;   // 标记是否已初始化过（用于避免重复初始化CAN等）
     int m_debugTickCount = 0;

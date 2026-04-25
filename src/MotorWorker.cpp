@@ -58,7 +58,9 @@ void MotorWorker::start()
     emit statusMessage(QString("电机 ID %1 已使能").arg(m_motorId));
 
     // 创建PID控制器
-    m_pid = new Pid::PidPosition(M6020_SPEED_PID_CONFIG, m_motor->data_.output_angular_velocity);
+    // Keep PID feedback and setpoint in the same unit (RPM).
+    m_feedback_rpm = 0.0f;
+    m_pid = new Pid::PidPosition(M6020_SPEED_PID_CONFIG, m_feedback_rpm);
     m_motor->setCtrl(*m_pid);
     emit statusMessage("PID 控制器已绑定");
 
@@ -114,6 +116,8 @@ void MotorWorker::onControlTick()
         return;
     }
 
+    // Refresh feedback first; PID reads this value by reference.
+    m_feedback_rpm = static_cast<float>(m_motor->motor_measure_.speed_rpm);
     m_motor->set(m_target_rpm);
     float rpm = m_motor->motor_measure_.speed_rpm;
     float current = m_motor->motor_measure_.given_current;
