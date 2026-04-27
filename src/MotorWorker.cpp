@@ -1,5 +1,6 @@
 #include "MotorWorker.h"
 #include "config.hpp"
+#include "config_manager.hpp"
 #include <QDebug>
 #include <mutex>
 
@@ -57,10 +58,19 @@ void MotorWorker::start()
     m_motor->enable();   // 实际上会调用 DJIMotorManager::register_motor
     emit statusMessage(QString("电机 ID %1 已使能").arg(m_motorId));
 
+    // 加载配置文件
+    auto& configManager = ConfigManager::instance();
+    if (configManager.loadConfig("config.json")) {
+        emit statusMessage("配置文件加载成功");
+    } else {
+        emit statusMessage("使用默认PID参数");
+    }
+
     // 创建PID控制器
     // Keep PID feedback and setpoint in the same unit (RPM).
     m_feedback_rpm = 0.0f;
-    m_pid = new Pid::PidPosition(M6020_SPEED_PID_CONFIG, m_feedback_rpm);
+    auto pidConfig = configManager.getPidConfig("M6020", "speed");
+    m_pid = new Pid::PidPosition(pidConfig, m_feedback_rpm);
     m_motor->setCtrl(*m_pid);
     emit statusMessage("PID 控制器已绑定");
 
@@ -121,6 +131,7 @@ void MotorWorker::onControlTick()
     m_motor->set(m_target_rpm);
     float rpm = m_motor->motor_measure_.speed_rpm;
     float current = m_motor->motor_measure_.given_current;
+    float target_current = m_motor->give_current;
     float output_angular_velocity = m_motor->data_.output_angular_velocity;
     float output_linear_velocity = m_motor->data_.output_linear_velocity;
 
@@ -129,9 +140,9 @@ void MotorWorker::onControlTick()
         emit statusMessage(QString("调试: target=%1 rpm, feedback=%2 rpm, command=%3, current=%4 mA")
                                .arg(m_target_rpm)
                                .arg(rpm)
-                               .arg(m_motor->give_current)
+                               .arg(target_current)
                                .arg(current));
     }
 
-    emit dataUpdated(rpm, current, m_target_rpm, output_angular_velocity, output_linear_velocity);
+    emit dataUpdated(rpm, current, m_target_rpm, target_current, output_angular_velocity, output_linear_velocity);
 }

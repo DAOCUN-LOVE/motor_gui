@@ -28,6 +28,7 @@ signals:
     void dataUpdated(float rpm,
                      float current,
                      float target_rpm,
+                     float target_current,
                      float output_angular_velocity,
                      float output_linear_velocity);
     void statusMessage(const QString &msg);

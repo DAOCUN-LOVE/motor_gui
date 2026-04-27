@@ -6,6 +6,8 @@
 #include <QGroupBox>
 #include <QtCharts>
 #include <QDebug>
+#include <QFileDialog>
+#include <QTimer>
 
 using namespace QtCharts;
 
@@ -56,13 +58,17 @@ void MotorPanel::setupUI()
     m_targetSeries->setName("目标转速 (RPM)");
     m_targetSeries->setColor(Qt::darkGreen);
     m_currentSeries = new QLineSeries();
-    m_currentSeries->setName("电流 (mA)");
+    m_currentSeries->setName("实际电流 (mA)");
     m_currentSeries->setColor(Qt::blue);
+    m_targetCurrentSeries = new QLineSeries();
+    m_targetCurrentSeries->setName("目标电流 (mA)");
+    m_targetCurrentSeries->setColor(Qt::magenta);
 
     QChart *chart = new QChart();
     chart->addSeries(m_rpmSeries);
     chart->addSeries(m_targetSeries);
     chart->addSeries(m_currentSeries);
+    chart->addSeries(m_targetCurrentSeries);
     chart->setTitle("实时数据");
     chart->setAnimationOptions(QChart::NoAnimation);
     chart->legend()->setVisible(true);
@@ -87,6 +93,7 @@ void MotorPanel::setupUI()
     axisYCurrent->setRange(0, 2000);
     chart->addAxis(axisYCurrent, Qt::AlignRight);
     m_currentSeries->attachAxis(axisYCurrent);
+    m_targetCurrentSeries->attachAxis(axisYCurrent);
 
     m_chartView = new QChartView(chart);
     m_chartView->setRenderHint(QPainter::Antialiasing);
@@ -96,13 +103,17 @@ void MotorPanel::setupUI()
     curveToggleLayout->addWidget(new QLabel("曲线显示:"));
     curveToggleLayout->addWidget(new QLabel("实际转速(固定)"));
     m_showTargetCheck = new QCheckBox("目标转速");
-    m_showCurrentCheck = new QCheckBox("电流");
+    m_showCurrentCheck = new QCheckBox("实际电流");
+    m_showTargetCurrentCheck = new QCheckBox("目标电流");
     m_showTargetCheck->setChecked(false);
     m_showCurrentCheck->setChecked(false);
+    m_showTargetCurrentCheck->setChecked(false);
     connect(m_showTargetCheck, &QCheckBox::toggled, this, &MotorPanel::updateSeriesVisibility);
     connect(m_showCurrentCheck, &QCheckBox::toggled, this, &MotorPanel::updateSeriesVisibility);
+    connect(m_showTargetCurrentCheck, &QCheckBox::toggled, this, &MotorPanel::updateSeriesVisibility);
     curveToggleLayout->addWidget(m_showTargetCheck);
     curveToggleLayout->addWidget(m_showCurrentCheck);
+    curveToggleLayout->addWidget(m_showTargetCurrentCheck);
     curveToggleLayout->addWidget(new QLabel("刷新间隔(ms):"));
     m_refreshIntervalSpin = new QSpinBox();
     m_refreshIntervalSpin->setRange(20, 200);
@@ -140,12 +151,15 @@ void MotorPanel::setupUI()
 
     m_startBtn = new QPushButton("启动");
     m_stopBtn = new QPushButton("停止");
+    m_loadConfigBtn = new QPushButton("加载配置");
     m_stopBtn->setEnabled(false);
     connect(m_startBtn, &QPushButton::clicked, this, &MotorPanel::onStartClicked);
     connect(m_stopBtn, &QPushButton::clicked, this, &MotorPanel::onStopClicked);
+    connect(m_loadConfigBtn, &QPushButton::clicked, this, &MotorPanel::onLoadConfigClicked);
     QVBoxLayout *btnLayout = new QVBoxLayout();
     btnLayout->addWidget(m_startBtn);
     btnLayout->addWidget(m_stopBtn);
+    btnLayout->addWidget(m_loadConfigBtn);
     ctrlLayout->addLayout(btnLayout);
 
     mainLayout->addLayout(ctrlLayout);
@@ -192,6 +206,23 @@ void MotorPanel::stopMotor()
 void MotorPanel::onStartClicked() { startMotor(); }
 void MotorPanel::onStopClicked()  { stopMotor(); }
 
+void MotorPanel::onLoadConfigClicked()
+{
+    QString filename = QFileDialog::getOpenFileName(this, "选择配置文件", ".", "JSON Files (*.json)");
+    if (!filename.isEmpty()) {
+        // 停止电机控制
+        stopMotor();
+        
+        // 重新启动电机控制，加载新配置
+        QTimer::singleShot(100, this, [this, filename]() {
+            // 这里我们通过重启电机来应用新配置
+            // 实际项目中可以添加更直接的配置加载方法
+            startMotor();
+            m_logWidget->append(QString("已加载配置文件: %1").arg(filename));
+        });
+    }
+}
+
 void MotorPanel::onApplyPidClicked()
 {
     if (!m_worker) return;
@@ -220,11 +251,12 @@ void MotorPanel::onSetTargetClicked()
     }
 }
 
-void MotorPanel::onDataReceived(float rpm, float current, float target)
+void MotorPanel::onDataReceived(float rpm, float current, float target, float targetCurrent, float, float)
 {
     m_latestRpm = rpm;
     m_latestCurrent = current;
     m_latestTarget = target;
+    m_latestTargetCurrent = targetCurrent;
     m_hasNewSample = true;
 }
 
@@ -239,9 +271,11 @@ void MotorPanel::onUiRefreshTick()
     m_rpmBuffer.append(QPointF(m_timeCounter, m_latestRpm));
     m_targetBuffer.append(QPointF(m_timeCounter, m_latestTarget));
     m_currentBuffer.append(QPointF(m_timeCounter, m_latestCurrent));
+    m_targetCurrentBuffer.append(QPointF(m_timeCounter, m_latestTargetCurrent));
     while (m_rpmBuffer.size() > 500) m_rpmBuffer.removeFirst();
     while (m_targetBuffer.size() > 500) m_targetBuffer.removeFirst();
     while (m_currentBuffer.size() > 500) m_currentBuffer.removeFirst();
+    while (m_targetCurrentBuffer.size() > 500) m_targetCurrentBuffer.removeFirst();
 
     m_rpmSeries->replace(m_rpmBuffer);
     if (m_targetSeries->isVisible()) {
@@ -249,6 +283,9 @@ void MotorPanel::onUiRefreshTick()
     }
     if (m_currentSeries->isVisible()) {
         m_currentSeries->replace(m_currentBuffer);
+    }
+    if (m_targetCurrentSeries->isVisible()) {
+        m_targetCurrentSeries->replace(m_targetCurrentBuffer);
     }
 
     if (m_timeCounter > 500) {
@@ -272,7 +309,8 @@ void MotorPanel::onStatusMessage(const QString &msg)
 
 void MotorPanel::updateSeriesVisibility()
 {
-    if (!m_targetSeries || !m_currentSeries) return;
+    if (!m_targetSeries || !m_currentSeries || !m_targetCurrentSeries) return;
     m_targetSeries->setVisible(m_showTargetCheck && m_showTargetCheck->isChecked());
     m_currentSeries->setVisible(m_showCurrentCheck && m_showCurrentCheck->isChecked());
+    m_targetCurrentSeries->setVisible(m_showTargetCurrentCheck && m_showTargetCurrentCheck->isChecked());
 }

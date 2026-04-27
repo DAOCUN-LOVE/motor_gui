@@ -18,6 +18,7 @@ private slots:
     void onStartAll();
     void onStopAll();
     void onRemoveMotor(int motorId);
+    void onSaveConfig();
 
 private:
     void setupUI();
